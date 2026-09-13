@@ -24,10 +24,36 @@
 #include "vga.h"
 #include "keyboard.h"
 #include "../include/types.h"
+#include "../include/interrupts.h"
+#include "../include/idt.h"
+#include "../include/pit.h"
+#include "../include/process.h"
+#include "../include/scheduler.h"
+
+static void test_process1(void)
+{
+    for (;;) {
+        vga_putchar('A');
+
+        for (volatile uint32_t i = 0; i < 500000; i++) {
+        }
+    }
+}
+
+static void test_process2(void)
+{
+    for (;;) {
+        vga_putchar('B');
+
+        for (volatile uint32_t i = 0; i < 500000; i++) {
+        }
+    }
+}
 
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
  * --------------------------------------------------------------------------*/
+static void cmd_ticks(void);
 static void cmd_help(void);
 static void cmd_clear(void);
 static void cmd_about(void);
@@ -108,6 +134,55 @@ static void print_splash(void) {
 /* ---------------------------------------------------------------------------
  * Shell command implementations
  * --------------------------------------------------------------------------*/
+static void cmd_ticks(void)
+{
+    vga_printf("Timer ticks: %u\\n", timer_ticks);
+}
+
+static void cmd_ps(void)
+{
+    vga_puts("\n  PID   NAME       STATE       TICKS\n");
+    vga_puts("  -----------------------------------\n");
+
+    for (int i = 0; i < MAX_PROCS; i++) {
+        if (proc_table[i].state == PROC_UNUSED) {
+            continue;
+        }
+
+        const char *state;
+
+        switch (proc_table[i].state) {
+            case PROC_READY:
+                state = "READY";
+                break;
+
+            case PROC_RUNNING:
+                state = "RUNNING";
+                break;
+
+            case PROC_BLOCKED:
+                state = "BLOCKED";
+                break;
+
+            case PROC_ZOMBIE:
+                state = "ZOMBIE";
+                break;
+
+            default:
+                state = "UNKNOWN";
+                break;
+        }
+
+        vga_printf("  %u  %s  %s  %u\n",
+                   proc_table[i].pid,
+                   proc_table[i].name,
+                   state,
+                   proc_table[i].ticks);
+    }
+
+    vga_puts("\n");
+}
+
 static void cmd_help(void) {
     vga_puts_color("\n  SENG21213-OS Shell Commands\n", VGA_YELLOW, VGA_BLACK);
     vga_puts("  ─────────────────────────────────────────────\n");
@@ -182,6 +257,8 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "clear") == 0) { cmd_clear(); continue; }
         if (k_strcmp(cmd, "about") == 0) { cmd_about(); continue; }
         if (k_strcmp(cmd, "mem")   == 0) { cmd_mem();   continue; }
+        if (k_strcmp(cmd, "ticks") == 0) { cmd_ticks(); continue; }
+        if (k_strcmp(cmd, "ps")    == 0) { cmd_ps();    continue; }
 
         if (k_strncmp(cmd, "echo ", 5) == 0) {
             cmd_echo(k_ltrim(cmd + 5));
@@ -189,8 +266,7 @@ static void shell_run(void) {
         }
 
         /* Milestone stubs */
-        if (k_strcmp(cmd, "ps")      == 0 ||
-            k_strcmp(cmd, "kill")    == 0 ||
+        if (k_strcmp(cmd, "kill")    == 0 ||
             k_strcmp(cmd, "threads") == 0 ||
             k_strcmp(cmd, "free")    == 0 ||
             k_strcmp(cmd, "ls")      == 0 ||
@@ -213,6 +289,27 @@ static void shell_run(void) {
 void kernel_main(void) {
     vga_init();
     kb_init();
+
+    proc_init();
+    scheduler_init();
+
+    proc_table[0].pid = 0;
+    proc_table[0].state = PROC_RUNNING;
+    proc_table[0].entry = NULL;
+    proc_table[0].name[0] = 'i';
+    proc_table[0].name[1] = 'd';
+    proc_table[0].name[2] = 'l';
+    proc_table[0].name[3] = 'e';
+    proc_table[0].name[4] = '\0';
+
+    proc_create("proc1", test_process1);
+    proc_create("proc2", test_process2);
+
+    idt_init();
+    pit_init();
+
+    __asm__ __volatile__("sti");
+
     print_splash();
     shell_run();
 

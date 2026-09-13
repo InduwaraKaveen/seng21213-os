@@ -47,9 +47,20 @@ BOOT_BIN  := boot/boot.bin
 KERNEL_ASM_SRC := kernel/kernel_entry.asm
 KERNEL_ASM_OBJ := build/kernel_entry.o
 
+INTERRUPT_ASM_SRC := kernel/interrupts.asm
+INTERRUPT_ASM_OBJ := build/interrupts.o
+
+SWITCH_ASM_SRC := kernel/switch.asm
+SWITCH_ASM_OBJ := build/switch.o
+
 KERNEL_C_SRCS  := kernel/kernel.c \
                    kernel/vga.c    \
-                   kernel/keyboard.c
+                   kernel/keyboard.c \
+                   kernel/idt.c      \
+                   kernel/irq.c       \
+                   kernel/pit.c       \
+                   kernel/process.c \
+                   kernel/scheduler.c
 
 # Add your new source files below as the course progresses:
 # Lecture 09: kernel/process.c kernel/scheduler.c
@@ -89,6 +100,16 @@ $(KERNEL_ASM_OBJ): $(KERNEL_ASM_SRC)
 	@echo "  [AS]  $<"
 	$(AS) $(ASFLAGS) $< -o $@
 
+$(INTERRUPT_ASM_OBJ): $(INTERRUPT_ASM_SRC)
+	@mkdir -p build
+	@echo "  [AS]  $<"
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(SWITCH_ASM_OBJ): $(SWITCH_ASM_SRC)
+	@mkdir -p build
+	@echo "  [AS]  $<"
+	$(AS) $(ASFLAGS) $< -o $@
+
 # ---------------------------------------------------------------------------
 # Kernel: C objects
 # ---------------------------------------------------------------------------
@@ -100,7 +121,7 @@ build/%.o: kernel/%.c
 # ---------------------------------------------------------------------------
 # Link kernel ELF, then extract flat binary
 # ---------------------------------------------------------------------------
-$(KERNEL_ELF): $(KERNEL_ASM_OBJ) $(KERNEL_C_OBJS)
+$(KERNEL_ELF): $(KERNEL_ASM_OBJ) $(INTERRUPT_ASM_OBJ) $(SWITCH_ASM_OBJ) $(KERNEL_C_OBJS)
 	@echo "  [LD]  $@"
 	$(LD) $(LDFLAGS) -T linker.ld $^ -o $@
 

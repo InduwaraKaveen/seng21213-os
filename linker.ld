@@ -31,6 +31,12 @@ SECTIONS {
         *(.bss)           /* Uninitialised data – zeroed by convention */
     }
 
+    . = ALIGN(0x200000);
+
+    .ramdisk (NOLOAD) : {
+        *(.ramdisk)
+    }
+
     /* First address after the complete kernel image, including .bss. */
     kernel_end = .;
 

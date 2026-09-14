@@ -33,6 +33,7 @@
 #include "../include/mutex.h"
 #include "../include/semaphore.h"
 #include "../include/pmm.h"
+#include "../include/fs.h"
 
 static void test_process1(void)
 {
@@ -147,6 +148,11 @@ static void cmd_clear(void);
 static void cmd_about(void);
 static void cmd_echo(const char *args);
 static void cmd_mem(void);
+static void cmd_ls(void);
+static void cmd_touch(const char *name);
+static void cmd_cat(const char *name);
+static void cmd_write_file(const char *name, char *argv[], int argc);
+static void cmd_rm(const char *name);
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -156,22 +162,42 @@ static int k_strcmp(const char *a, const char *b) {
     return (uint8_t)*a - (uint8_t)*b;
 }
 
-static int k_strncmp(const char *a, const char *b, size_t n) {
-    while (n-- && *a && (*a == *b)) { a++; b++; }
-    return n == (size_t)-1 ? 0 : (uint8_t)*a - (uint8_t)*b;
-}
-
 static size_t k_strlen(const char *s) {
     size_t n = 0;
     while (s[n]) n++;
     return n;
 }
 
-/* Skip leading spaces */
-static const char *k_ltrim(const char *s) {
-    while (*s == ' ') s++;
-    return s;
+static int k_tokenize(char *line, char *argv[], int max_args)
+{
+    int argc = 0;
+
+    while (*line && argc < max_args) {
+        while (*line == ' ') {
+            line++;
+        }
+
+        if (*line == '\0') {
+            break;
+        }
+
+        argv[argc++] = line;
+
+        while (*line && *line != ' ') {
+            line++;
+        }
+
+        if (*line == '\0') {
+            break;
+        }
+
+        *line = '\0';
+        line++;
+    }
+
+    return argc;
 }
+
 
 /* ---------------------------------------------------------------------------
  * Splash Screen
@@ -285,8 +311,11 @@ static void cmd_help(void) {
     vga_puts("  kill    – [L09] Terminate a process\n");
     vga_puts("  threads – [L10] List kernel threads\n");
     vga_puts("  free    – Show free physical memory\n");
-    vga_puts("  ls      – [L12] List files\n");
-    vga_puts("  cat     – [L12] Print file contents\n\n");
+    vga_puts("  ls      – List files\n");
+    vga_puts("  touch   – Create an empty file\n");
+    vga_puts("  cat     – Print file contents\n");
+    vga_puts("  write   – Write text to a file\n");
+    vga_puts("  rm      – Remove a file\n\n");
 }
 
 static void cmd_clear(void) {
@@ -326,6 +355,136 @@ static void cmd_mem(void) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Stage 4 filesystem commands
+ * --------------------------------------------------------------------------*/
+
+static inode_t shell_ls_buffer[MAX_INODES];
+
+static void cmd_ls(void)
+{
+    int count = fs_ls(shell_ls_buffer, MAX_INODES);
+
+    vga_puts("\n  NAME                     SIZE\n");
+    vga_puts("  ------------------------ --------\n");
+
+    for (int i = 0; i < count; i++) {
+        vga_printf("  %-24s %u\n",
+                   shell_ls_buffer[i].name,
+                   shell_ls_buffer[i].size);
+    }
+
+    vga_printf("  %d file(s)\n\n", count);
+}
+
+static void cmd_touch(const char *name)
+{
+    if (name == 0 || name[0] == '\0') {
+        vga_puts("  Usage: touch <file>\n");
+        return;
+    }
+
+    int fd = fs_open(name, O_WRONLY | O_CREAT);
+
+    if (fd < 0) {
+        vga_puts("  Cannot create file\n");
+        return;
+    }
+
+    fs_close(fd);
+    vga_puts("  OK\n");
+}
+
+static void cmd_cat(const char *name)
+{
+    if (name == 0 || name[0] == '\0') {
+        vga_puts("  Usage: cat <file>\n");
+        return;
+    }
+
+    int fd = fs_open(name, O_RDONLY);
+
+    if (fd < 0) {
+        vga_puts("  File not found\n");
+        return;
+    }
+
+    char buffer[513];
+
+    for (;;) {
+        int n = fs_read(fd, buffer, 512);
+
+        if (n <= 0) {
+            break;
+        }
+
+        buffer[n] = '\0';
+        vga_puts(buffer);
+
+        if (n < 512) {
+            break;
+        }
+    }
+
+    vga_puts("\n");
+    fs_close(fd);
+}
+
+static void cmd_write_file(const char *name, char *argv[], int argc)
+{
+    if (name == 0 || name[0] == '\0' || argc < 3) {
+        vga_puts("  Usage: write <file> <text...>\n");
+        return;
+    }
+
+    int fd = fs_open(name, O_WRONLY | O_CREAT | O_TRUNC);
+
+    if (fd < 0) {
+        vga_puts("  Cannot open file for writing\n");
+        return;
+    }
+
+    int total = 0;
+
+    for (int i = 2; i < argc; i++) {
+        if (i > 2) {
+            char space = ' ';
+            total += fs_write(fd, &space, 1);
+        }
+
+        int len = (int)k_strlen(argv[i]);
+
+        if (len > 0) {
+            int written = fs_write(fd, argv[i], len);
+            total += written;
+
+            if (written != len) {
+                vga_puts("  Write incomplete\n");
+                break;
+            }
+        }
+    }
+
+    fs_close(fd);
+
+    vga_printf("  Wrote %d bytes\n", total);
+}
+
+static void cmd_rm(const char *name)
+{
+    if (name == 0 || name[0] == '\0') {
+        vga_puts("  Usage: rm <file>\n");
+        return;
+    }
+
+    if (fs_unlink(name) < 0) {
+        vga_puts("  File not found\n");
+        return;
+    }
+
+    vga_puts("  OK\n");
+}
+
+/* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
 static char  shell_buf[256];
@@ -339,9 +498,15 @@ static void shell_run(void) {
         vga_puts_color(prompt, VGA_LIGHT_GREEN, VGA_BLACK);
         kb_readline(shell_buf, sizeof(shell_buf));
 
-        /* Trim leading whitespace */
-        const char *cmd = k_ltrim(shell_buf);
-        if (k_strlen(cmd) == 0) continue;
+        /* Tokenize command line */
+        char *argv[16];
+        int argc = k_tokenize(shell_buf, argv, 16);
+
+        if (argc == 0) {
+            continue;
+        }
+
+        const char *cmd = argv[0];
 
         /* Dispatch */
         if (k_strcmp(cmd, "help")  == 0) { cmd_help();  continue; }
@@ -356,14 +521,65 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "ticks") == 0) { cmd_ticks(); continue; }
         if (k_strcmp(cmd, "ps")    == 0) { cmd_ps();    continue; }
 
-        if (k_strncmp(cmd, "echo ", 5) == 0) {
-            cmd_echo(k_ltrim(cmd + 5));
+        if (k_strcmp(cmd, "ls") == 0) {
+            cmd_ls();
+            continue;
+        }
+
+        if (k_strcmp(cmd, "touch") == 0) {
+            if (argc != 2) {
+                vga_puts("  Usage: touch <file>\n");
+            } else {
+                cmd_touch(argv[1]);
+            }
+            continue;
+        }
+
+        if (k_strcmp(cmd, "cat") == 0) {
+            if (argc != 2) {
+                vga_puts("  Usage: cat <file>\n");
+            } else {
+                cmd_cat(argv[1]);
+            }
+            continue;
+        }
+
+        if (k_strcmp(cmd, "write") == 0) {
+            if (argc < 3) {
+                vga_puts("  Usage: write <file> <text...>\n");
+            } else {
+                cmd_write_file(argv[1], argv, argc);
+            }
+            continue;
+        }
+
+        if (k_strcmp(cmd, "rm") == 0) {
+            if (argc != 2) {
+                vga_puts("  Usage: rm <file>\n");
+            } else {
+                cmd_rm(argv[1]);
+            }
+            continue;
+        }
+
+        if (k_strcmp(cmd, "echo") == 0) {
+            if (argc == 1) {
+                cmd_echo("");
+            } else {
+                for (int i = 1; i < argc; i++) {
+                    if (i > 1) {
+                        vga_putchar(' ');
+                    }
+                    vga_puts(argv[i]);
+                }
+                vga_puts("\n");
+            }
             continue;
         }
 
         if (k_strcmp(cmd, "threads") == 0) {
             vga_puts_color("  Threads:\n", VGA_LIGHT_CYAN, VGA_BLACK);
-            vga_printf("  Current thread index: %d\\n", current_thread);
+            vga_printf("  Current thread index: %d\n", current_thread);
             vga_puts("  TID   PID   STATE   ESP       TICKS   NAME\n");
             vga_puts("  ---------------------------------------\n");
 
@@ -447,9 +663,7 @@ static void shell_run(void) {
         }
 
         /* Milestone stubs */
-        if (k_strcmp(cmd, "kill") == 0 ||
-            k_strcmp(cmd, "ls")   == 0 ||
-            k_strcmp(cmd, "cat")  == 0) {
+        if (k_strcmp(cmd, "kill") == 0) {
             vga_puts_color("  [TODO] This command is not yet implemented.\n",
                            VGA_YELLOW, VGA_BLACK);
             vga_puts("  Implement it as part of your lecture assignment.\n");
@@ -469,6 +683,8 @@ void kernel_main(void) {
     vga_init();
     kb_init();
     pmm_init();
+
+    fs_init();
 
     proc_init();
     scheduler_init();
@@ -492,15 +708,6 @@ void kernel_main(void) {
     proc_table[0].name[2] = 'l';
     proc_table[0].name[3] = 'e';
     proc_table[0].name[4] = '\0';
-
-    proc_create("proc1", test_process1);
-    proc_create("proc2", test_process2);
-
-    thread_create(1, "thread1", test_thread1);
-    thread_create(1, "mutex1", mutex_test_thread1);
-    thread_create(1, "mutex2", mutex_test_thread2);
-    thread_create(1, "producer", semaphore_test_producer);
-    thread_create(1, "consumer", semaphore_test_consumer);
 
     idt_init();
     pit_init();

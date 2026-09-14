@@ -27,13 +27,13 @@ ASFLAGS  := -f elf32
 ifneq (, $(shell which i686-elf-gcc 2>/dev/null))
     CC   := i686-elf-gcc
     LD   := i686-elf-ld
-    CFLAGS := -m32 -ffreestanding -fno-stack-protector -fno-pie -nostdlib \
+    CFLAGS := -std=c11 -m32 -ffreestanding -fno-stack-protector -fno-pie -nostdlib \
               -Wall -Wextra -O2 -I./include
     LDFLAGS := -m elf_i386 -nostdlib
 else
     CC   := gcc
     LD   := ld
-    CFLAGS := -m32 -ffreestanding -fno-stack-protector -fno-pie -nostdlib \
+    CFLAGS := -std=c11 -m32 -ffreestanding -fno-stack-protector -fno-pie -nostdlib \
               -Wall -Wextra -O2 -I./include
     LDFLAGS := -m elf_i386 -nostdlib
 endif
@@ -60,7 +60,10 @@ KERNEL_C_SRCS  := kernel/kernel.c \
                    kernel/irq.c       \
                    kernel/pit.c       \
                    kernel/process.c \
-                   kernel/scheduler.c
+                   kernel/scheduler.c \
+                   kernel/thread.c \
+                   kernel/mutex.c \
+                   kernel/semaphore.c
 
 # Add your new source files below as the course progresses:
 # Lecture 09: kernel/process.c kernel/scheduler.c

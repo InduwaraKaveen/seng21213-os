@@ -29,6 +29,9 @@
 #include "../include/pit.h"
 #include "../include/process.h"
 #include "../include/scheduler.h"
+#include "../include/thread.h"
+#include "../include/mutex.h"
+#include "../include/semaphore.h"
 
 static void test_process1(void)
 {
@@ -37,6 +40,90 @@ static void test_process1(void)
 
         for (volatile uint32_t i = 0; i < 500000; i++) {
         }
+    }
+}
+
+static void test_thread1(void)
+{
+    for (;;) {
+        vga_puts_color("T", VGA_LIGHT_CYAN, VGA_BLACK);
+        for (volatile uint32_t i = 0; i < 1000000; i++) {
+        }
+    }
+}
+
+static volatile int mutex_test_counter = 0;
+static mutex_t mutex_test_lock;
+
+static semaphore_t semaphore_test_empty;
+static semaphore_t semaphore_test_full;
+static mutex_t semaphore_test_lock;
+static int semaphore_test_buffer;
+static volatile int semaphore_test_produced = 0;
+static volatile int semaphore_test_consumed = 0;
+static volatile int semaphore_test_errors = 0;
+
+static void semaphore_test_producer(void)
+{
+    for (int i = 0; i < 100; i++) {
+        semaphore_wait(&semaphore_test_empty);
+
+        mutex_lock(&semaphore_test_lock);
+        semaphore_test_buffer = i;
+        semaphore_test_produced++;
+        mutex_unlock(&semaphore_test_lock);
+
+        semaphore_signal(&semaphore_test_full);
+    }
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+static void mutex_test_thread1(void)
+{
+    for (int i = 0; i < 100000; i++) {
+        mutex_lock(&mutex_test_lock);
+        mutex_test_counter++;
+        mutex_unlock(&mutex_test_lock);
+    }
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+static void semaphore_test_consumer(void)
+{
+    for (int i = 0; i < 100; i++) {
+        semaphore_wait(&semaphore_test_full);
+
+        mutex_lock(&semaphore_test_lock);
+        if (semaphore_test_buffer != i) {
+            semaphore_test_errors++;
+        }
+        semaphore_test_consumed++;
+        mutex_unlock(&semaphore_test_lock);
+
+        semaphore_signal(&semaphore_test_empty);
+    }
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+static void mutex_test_thread2(void)
+{
+    for (int i = 0; i < 100000; i++) {
+        mutex_lock(&mutex_test_lock);
+        mutex_test_counter++;
+        mutex_unlock(&mutex_test_lock);
+    }
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
     }
 }
 
@@ -265,12 +352,96 @@ static void shell_run(void) {
             continue;
         }
 
+        if (k_strcmp(cmd, "threads") == 0) {
+            vga_puts_color("  Threads:\n", VGA_LIGHT_CYAN, VGA_BLACK);
+            vga_printf("  Current thread index: %d\\n", current_thread);
+            vga_puts("  TID   PID   STATE   ESP       TICKS   NAME\n");
+            vga_puts("  ---------------------------------------\n");
+
+            for (int i = 0; i < MAX_THREADS; i++) {
+                if (thread_table[i].state == PROC_UNUSED) {
+                    continue;
+                }
+
+                const char *state;
+
+                switch (thread_table[i].state) {
+                    case PROC_READY:
+                        state = "READY";
+                        break;
+
+                    case PROC_RUNNING:
+                        state = "RUNNING";
+                        break;
+
+                    case PROC_BLOCKED:
+                        state = "BLOCKED";
+                        break;
+
+                    case PROC_ZOMBIE:
+                        state = "ZOMBIE";
+                        break;
+
+                    default:
+                        state = "UNKNOWN";
+                        break;
+                }
+
+                vga_printf("  %u    %u    %s    %x  %u    %s\n",
+                           thread_table[i].tid,
+                           thread_table[i].pid,
+                           state,
+                           thread_table[i].esp,
+                           thread_table[i].ticks,
+                           thread_table[i].name);
+            }
+
+            vga_puts("\n");
+            continue;
+        }
+
+        if (k_strcmp(cmd, "mutex") == 0) {
+            vga_printf("  Mutex test counter: %d\n", mutex_test_counter);
+
+            if (mutex_test_counter == 200000) {
+                vga_puts_color("  PASS: final counter is 200000\n",
+                               VGA_LIGHT_GREEN, VGA_BLACK);
+            } else {
+                vga_puts_color("  FAIL: final counter is not 200000\n",
+                               VGA_LIGHT_RED, VGA_BLACK);
+            }
+
+            vga_puts("\n");
+            continue;
+        }
+
+        if (k_strcmp(cmd, "semaphore") == 0) {
+            vga_printf("  Semaphore produced: %d\n",
+                       semaphore_test_produced);
+            vga_printf("  Semaphore consumed: %d\n",
+                       semaphore_test_consumed);
+            vga_printf("  Semaphore errors: %d\n",
+                       semaphore_test_errors);
+
+            if (semaphore_test_produced == 100 &&
+                semaphore_test_consumed == 100 &&
+                semaphore_test_errors == 0) {
+                vga_puts_color("  PASS: producer/consumer test succeeded\n",
+                               VGA_LIGHT_GREEN, VGA_BLACK);
+            } else {
+                vga_puts_color("  FAIL: producer/consumer test failed\n",
+                               VGA_LIGHT_RED, VGA_BLACK);
+            }
+
+            vga_puts("\n");
+            continue;
+        }
+
         /* Milestone stubs */
-        if (k_strcmp(cmd, "kill")    == 0 ||
-            k_strcmp(cmd, "threads") == 0 ||
-            k_strcmp(cmd, "free")    == 0 ||
-            k_strcmp(cmd, "ls")      == 0 ||
-            k_strcmp(cmd, "cat")     == 0) {
+        if (k_strcmp(cmd, "kill") == 0 ||
+            k_strcmp(cmd, "free") == 0 ||
+            k_strcmp(cmd, "ls")   == 0 ||
+            k_strcmp(cmd, "cat")  == 0) {
             vga_puts_color("  [TODO] This command is not yet implemented.\n",
                            VGA_YELLOW, VGA_BLACK);
             vga_puts("  Implement it as part of your lecture assignment.\n");
@@ -292,6 +463,17 @@ void kernel_main(void) {
 
     proc_init();
     scheduler_init();
+    thread_init();
+
+    mutex_init(&mutex_test_lock);
+    mutex_test_counter = 0;
+    semaphore_init(&semaphore_test_empty, 1);
+    semaphore_init(&semaphore_test_full, 0);
+    mutex_init(&semaphore_test_lock);
+    semaphore_test_buffer = 0;
+    semaphore_test_produced = 0;
+    semaphore_test_consumed = 0;
+    semaphore_test_errors = 0;
 
     proc_table[0].pid = 0;
     proc_table[0].state = PROC_RUNNING;
@@ -304,6 +486,12 @@ void kernel_main(void) {
 
     proc_create("proc1", test_process1);
     proc_create("proc2", test_process2);
+
+    thread_create(1, "thread1", test_thread1);
+    thread_create(1, "mutex1", mutex_test_thread1);
+    thread_create(1, "mutex2", mutex_test_thread2);
+    thread_create(1, "producer", semaphore_test_producer);
+    thread_create(1, "consumer", semaphore_test_consumer);
 
     idt_init();
     pit_init();

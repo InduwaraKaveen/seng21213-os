@@ -76,7 +76,7 @@ char kb_getchar(void) {
     }
 }
 
-int kb_readline(char *buf, int len) {
+int kb_readline(char *buf, int len, kb_completion_fn completion) {
     int i = 0;
     while (i < len - 1) {
         char c = kb_getchar();
@@ -86,6 +86,32 @@ int kb_readline(char *buf, int len) {
         }
         if (c == '\b') {
             if (i > 0) { i--; vga_putchar('\b'); }
+            continue;
+        }
+        if (c == KB_KEY_TAB) {
+            if (completion) {
+                const char *match = completion(buf, i);
+
+                if (match) {
+                    int match_len = 0;
+                    while (match[match_len] && match_len < len - 1) {
+                        match_len++;
+                    }
+
+                    while (i > 0) {
+                        vga_putchar('\b');
+                        i--;
+                    }
+
+                    for (int j = 0; j < match_len; j++) {
+                        buf[j] = match[j];
+                        vga_putchar(match[j]);
+                    }
+
+                    i = match_len;
+                    buf[i] = '\0';
+                }
+            }
             continue;
         }
         buf[i++] = c;

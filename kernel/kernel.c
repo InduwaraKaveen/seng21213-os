@@ -168,6 +168,56 @@ static size_t k_strlen(const char *s) {
     return n;
 }
 
+static const char *shell_commands[] = {
+    "help",
+    "clear",
+    "about",
+    "echo",
+    "mem",
+    "meminfo",
+    "free",
+    "ticks",
+    "ps",
+    "threads",
+    "ls",
+    "touch",
+    "cat",
+    "write",
+    "rm"
+};
+
+#define SHELL_COMMAND_COUNT \
+    (sizeof(shell_commands) / sizeof(shell_commands[0]))
+
+static const char *shell_find_completion(const char *prefix, int prefix_len)
+{
+    const char *match = 0;
+    int matches = 0;
+
+    for (size_t i = 0; i < SHELL_COMMAND_COUNT; i++) {
+        const char *command = shell_commands[i];
+        int matches_prefix = 1;
+
+        for (int j = 0; j < prefix_len; j++) {
+            if (command[j] != prefix[j]) {
+                matches_prefix = 0;
+                break;
+            }
+        }
+
+        if (matches_prefix && command[prefix_len] != '\0') {
+            match = command;
+            matches++;
+        }
+    }
+
+    if (matches == 1) {
+        return match;
+    }
+
+    return 0;
+}
+
 static int k_tokenize(char *line, char *argv[], int max_args)
 {
     int argc = 0;
@@ -496,7 +546,7 @@ static void shell_run(void) {
 
     while (true) {
         vga_puts_color(prompt, VGA_LIGHT_GREEN, VGA_BLACK);
-        kb_readline(shell_buf, sizeof(shell_buf));
+        kb_readline(shell_buf, sizeof(shell_buf), shell_find_completion);
 
         /* Tokenize command line */
         char *argv[16];

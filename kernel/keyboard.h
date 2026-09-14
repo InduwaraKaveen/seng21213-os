@@ -13,11 +13,13 @@
 #define KB_BUF_SIZE 256
 
 #define KB_KEY_TAB '\t'
+#define KB_KEY_UP 0x80
+#define KB_KEY_DOWN 0x81
 
 void kb_init(void);
 
 /* Read one character (blocks until a key is pressed) */
-char kb_getchar(void);
+int  kb_getchar(void);
 
 typedef const char *(*kb_completion_fn)(const char *prefix, int prefix_len);
 

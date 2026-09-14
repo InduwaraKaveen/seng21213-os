@@ -45,6 +45,66 @@ static const char sc_ascii_shift[128] = {
 
 static bool shift_held = false;
 
+#define KB_HISTORY_SIZE 20
+#define KB_HISTORY_LINE_SIZE KB_BUF_SIZE
+
+static char kb_history[KB_HISTORY_SIZE][KB_HISTORY_LINE_SIZE];
+static int kb_history_count = 0;
+static int kb_history_next = 0;
+
+static void kb_history_add(const char *line)
+{
+    if (!line || line[0] == '\0') return;
+
+    if (kb_history_count > 0) {
+        int last = (kb_history_next + KB_HISTORY_SIZE - 1) % KB_HISTORY_SIZE;
+        int same = 1;
+
+        for (int i = 0; i < KB_HISTORY_LINE_SIZE; i++) {
+            if (kb_history[last][i] != line[i]) {
+                same = 0;
+                break;
+            }
+            if (line[i] == '\0') break;
+        }
+
+        if (same) return;
+    }
+
+    int i = 0;
+    while (i < KB_HISTORY_LINE_SIZE - 1 && line[i] != '\0') {
+        kb_history[kb_history_next][i] = line[i];
+        i++;
+    }
+    kb_history[kb_history_next][i] = '\0';
+
+    kb_history_next = (kb_history_next + 1) % KB_HISTORY_SIZE;
+
+    if (kb_history_count < KB_HISTORY_SIZE) {
+        kb_history_count++;
+    }
+}
+
+static const char *kb_history_get(int offset)
+{
+    if (offset < 0 || offset >= kb_history_count) return 0;
+
+    int index = kb_history_next - 1 - offset;
+    while (index < 0) index += KB_HISTORY_SIZE;
+
+    return kb_history[index];
+}
+
+static void kb_clear_line(char *buf, int *len)
+{
+    while (*len > 0) {
+        vga_putchar('\b');
+        (*len)--;
+    }
+
+    buf[0] = '\0';
+}
+
 void kb_init(void) {
     /* Flush any stale data in the keyboard buffer */
     while (inb(KB_STATUS_PORT) & KB_STATUS_OBF) {
@@ -52,12 +112,21 @@ void kb_init(void) {
     }
 }
 
-char kb_getchar(void) {
+int kb_getchar(void) {
     uint8_t sc;
     while (true) {
         /* Wait until output buffer is full (key available) */
         while (!(inb(KB_STATUS_PORT) & KB_STATUS_OBF));
         sc = inb(KB_DATA_PORT);
+
+        if (sc == 0xE0) {
+            while (!(inb(KB_STATUS_PORT) & KB_STATUS_OBF));
+            uint8_t extended = inb(KB_DATA_PORT);
+
+            if (extended == 0x48) return KB_KEY_UP;
+            if (extended == 0x50) return KB_KEY_DOWN;
+            continue;
+        }
 
         if (sc & 0x80) {
             /* Key release: bit 7 set, clear modifier state */
@@ -78,16 +147,89 @@ char kb_getchar(void) {
 
 int kb_readline(char *buf, int len, kb_completion_fn completion) {
     int i = 0;
+    int history_offset = -1;
+
     while (i < len - 1) {
-        char c = kb_getchar();
+        int c = kb_getchar();
+
         if (c == '\n' || c == '\r') {
             vga_putchar('\n');
+            buf[i] = '\0';
+            kb_history_add(buf);
             break;
         }
+
         if (c == '\b') {
-            if (i > 0) { i--; vga_putchar('\b'); }
+            if (i > 0) {
+                i--;
+                buf[i] = '\0';
+                vga_putchar('\b');
+            }
             continue;
         }
+
+        if (c == KB_KEY_UP) {
+            if (kb_history_count > 0) {
+                if (history_offset < kb_history_count - 1) {
+                    history_offset++;
+                }
+
+                const char *history_line = kb_history_get(history_offset);
+
+                if (history_line) {
+                    kb_clear_line(buf, &i);
+
+                    int history_len = 0;
+                    while (history_line[history_len] &&
+                           history_len < len - 1) {
+                        history_len++;
+                    }
+
+                    for (int j = 0; j < history_len; j++) {
+                        buf[j] = history_line[j];
+                        vga_putchar(history_line[j]);
+                    }
+
+                    i = history_len;
+                    buf[i] = '\0';
+                }
+            }
+            continue;
+        }
+
+        if (c == KB_KEY_DOWN) {
+            if (history_offset >= 0) {
+                if (history_offset > 0) {
+                    history_offset--;
+                } else {
+                    history_offset = -1;
+                }
+
+                kb_clear_line(buf, &i);
+
+                if (history_offset >= 0) {
+                    const char *history_line = kb_history_get(history_offset);
+
+                    if (history_line) {
+                        int history_len = 0;
+                        while (history_line[history_len] &&
+                               history_len < len - 1) {
+                            history_len++;
+                        }
+
+                        for (int j = 0; j < history_len; j++) {
+                            buf[j] = history_line[j];
+                            vga_putchar(history_line[j]);
+                        }
+
+                        i = history_len;
+                        buf[i] = '\0';
+                    }
+                }
+            }
+            continue;
+        }
+
         if (c == KB_KEY_TAB) {
             if (completion) {
                 const char *match = completion(buf, i);
@@ -114,9 +256,16 @@ int kb_readline(char *buf, int len, kb_completion_fn completion) {
             }
             continue;
         }
-        buf[i++] = c;
-        vga_putchar(c);
+
+        if (i < len - 1) {
+            buf[i++] = c;
+            buf[i] = '\0';
+            vga_putchar(c);
+        }
+
+        history_offset = -1;
     }
+
     buf[i] = '\0';
     return i;
 }

@@ -52,6 +52,38 @@ load_kernel:
     call print_rm
 
 ; ---------------------------------------------------------------------------
+; Detect physical memory using BIOS E820
+;
+; Store:
+;   0x8000 : uint16_t entry count
+;   0x8004 : E820 entries, 24 bytes each
+;
+; This must run in Real Mode because BIOS interrupt 0x15 is unavailable
+; after entering Protected Mode.
+; ---------------------------------------------------------------------------
+detect_memory:
+    xor  ax, ax
+    mov  es, ax              ; ES = 0, so ES:DI points to physical 0x8004
+    mov  di, 0x8004
+    xor  ebx, ebx            ; EBX = 0 starts the E820 enumeration
+    xor  bp, bp              ; BP = number of entries
+
+.e820_loop:
+    mov  eax, 0xE820
+    mov  ecx, 24             ; Size of E820 entry
+    mov  edx, 0x534D4150     ; 'SMAP'
+    int  0x15
+    jc   .e820_done
+
+    inc  bp
+    add  di, 24
+    test ebx, ebx
+    jnz  .e820_loop
+
+.e820_done:
+    mov  [0x8000], bp
+
+; ---------------------------------------------------------------------------
 ; Enter Protected Mode
 ; ---------------------------------------------------------------------------
 enter_pm:

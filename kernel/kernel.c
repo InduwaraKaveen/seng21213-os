@@ -32,6 +32,7 @@
 #include "../include/thread.h"
 #include "../include/mutex.h"
 #include "../include/semaphore.h"
+#include "../include/pmm.h"
 
 static void test_process1(void)
 {
@@ -277,12 +278,13 @@ static void cmd_help(void) {
     vga_puts("  clear   – Clear the screen\n");
     vga_puts("  about   – About this OS and course\n");
     vga_puts("  echo    – Echo text to screen\n");
-    vga_puts("  mem     – Memory map (stub)\n");
+    vga_puts("  mem     – Show physical memory usage\n");
+    vga_puts("  meminfo – Show physical memory usage\n");
     vga_puts_color("\n  Milestones (to implement):\n", VGA_LIGHT_CYAN, VGA_BLACK);
     vga_puts("  ps      – [L09] List processes\n");
     vga_puts("  kill    – [L09] Terminate a process\n");
     vga_puts("  threads – [L10] List kernel threads\n");
-    vga_puts("  free    – [L11] Show free memory\n");
+    vga_puts("  free    – Show free physical memory\n");
     vga_puts("  ls      – [L12] List files\n");
     vga_puts("  cat     – [L12] Print file contents\n\n");
 }
@@ -309,16 +311,18 @@ static void cmd_echo(const char *args) {
 }
 
 static void cmd_mem(void) {
-    /* Stage 0 stub – students implement the real PMM in Lecture 11 */
-    vga_puts_color("\n  Memory Map (stub – implement PMM in Lecture 11)\n",
+    uint32_t total_kb = (pmm_total_frames() * FRAME_SIZE) / 1024u;
+    uint32_t free_kb  = (pmm_free_frames() * FRAME_SIZE) / 1024u;
+    uint32_t used_kb  = total_kb - free_kb;
+
+    vga_puts_color("\n  Physical Memory\n",
                    VGA_LIGHT_CYAN, VGA_BLACK);
     vga_puts("  ─────────────────────────────────────────────\n");
-    vga_puts("  0x00000000 – 0x000FFFFF  :  First 1 MB (reserved/BIOS)\n");
-    vga_puts("  0x00100000 – 0x00EFFFFF  :  Extended memory (usable ~14 MB)\n");
-    vga_puts("  0x00F00000 – 0x00FFFFFF  :  BIOS / ROM area\n");
-    vga_puts("  0xB8000    – 0xBFFFF     :  VGA frame buffer\n");
-    vga_puts_color("\n  TODO: Use BIOS int 0x15, EAX=0xE820 to get real memory map\n\n",
-                   VGA_YELLOW, VGA_BLACK);
+    vga_printf("  Total : %u KB\n", total_kb);
+    vga_printf("  Used  : %u KB\n", used_kb);
+    vga_printf("  Free  : %u KB\n", free_kb);
+    vga_printf("  Frames: %u free / %u total\n\n",
+               pmm_free_frames(), pmm_total_frames());
 }
 
 /* ---------------------------------------------------------------------------
@@ -343,7 +347,12 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "help")  == 0) { cmd_help();  continue; }
         if (k_strcmp(cmd, "clear") == 0) { cmd_clear(); continue; }
         if (k_strcmp(cmd, "about") == 0) { cmd_about(); continue; }
-        if (k_strcmp(cmd, "mem")   == 0) { cmd_mem();   continue; }
+        if (k_strcmp(cmd, "mem")     == 0 ||
+            k_strcmp(cmd, "meminfo")  == 0 ||
+            k_strcmp(cmd, "free")     == 0) {
+            cmd_mem();
+            continue;
+        }
         if (k_strcmp(cmd, "ticks") == 0) { cmd_ticks(); continue; }
         if (k_strcmp(cmd, "ps")    == 0) { cmd_ps();    continue; }
 
@@ -439,7 +448,6 @@ static void shell_run(void) {
 
         /* Milestone stubs */
         if (k_strcmp(cmd, "kill") == 0 ||
-            k_strcmp(cmd, "free") == 0 ||
             k_strcmp(cmd, "ls")   == 0 ||
             k_strcmp(cmd, "cat")  == 0) {
             vga_puts_color("  [TODO] This command is not yet implemented.\n",
@@ -460,6 +468,7 @@ static void shell_run(void) {
 void kernel_main(void) {
     vga_init();
     kb_init();
+    pmm_init();
 
     proc_init();
     scheduler_init();

@@ -31,6 +31,9 @@ SECTIONS {
         *(.bss)           /* Uninitialised data – zeroed by convention */
     }
 
+    /* First address after the complete kernel image, including .bss. */
+    kernel_end = .;
+
     /DISCARD/ : {
         *(.eh_frame)      /* Exception frames – not needed in a bare kernel */
         *(.comment)

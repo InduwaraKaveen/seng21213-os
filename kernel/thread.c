@@ -52,6 +52,7 @@ void thread_init(void)
         thread_table[i].entry = NULL;
         thread_table[i].name[0] = '\0';
         thread_table[i].ticks = 0;
+        thread_table[i].wake_tick = 0;
     }
 
     current_thread = -1;
@@ -79,6 +80,7 @@ tcb_t *thread_create(uint32_t pid, const char *name, void (*fn)(void))
             );
             thread->entry = fn;
             thread->ticks = 0;
+            thread->wake_tick = 0;
 
             int j = 0;
             while (name[j] != '\0' && j < 23) {

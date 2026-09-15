@@ -18,6 +18,7 @@ void proc_init(void)
         proc_table[i].entry = NULL;
         proc_table[i].name[0] = '\0';
         proc_table[i].ticks = 0;
+        proc_table[i].wake_tick = 0;
     }
 
     current_proc = 0;
@@ -81,6 +82,7 @@ pcb_t *proc_create(const char *name, void (*entry)(void))
             proc->esp = process_stack_init(proc->stack_base + STACK_SIZE, entry);
             proc->entry = entry;
             proc->ticks = 0;
+            proc->wake_tick = 0;
 
             int j = 0;
             while (name[j] != '\0' && j < 31) {

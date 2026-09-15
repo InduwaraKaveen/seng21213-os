@@ -1,6 +1,7 @@
 #include "../include/interrupts.h"
 #include "../include/io.h"
 #include "../include/scheduler.h"
+#include "../include/sleep.h"
 #include "../include/process.h"
 #include "../include/thread.h"
 
@@ -9,6 +10,7 @@ volatile uint32_t timer_ticks = 0;
 uint32_t *irq0_handler(uint32_t *saved_esp)
 {
     timer_ticks++;
+    sleep_tick();
 
     /*
      * Save the stack of whichever execution unit is currently running.

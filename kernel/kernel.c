@@ -29,9 +29,12 @@
 #include "../include/pit.h"
 #include "../include/process.h"
 #include "../include/scheduler.h"
+#include "../include/sleep.h"
 #include "../include/thread.h"
 #include "../include/mutex.h"
 #include "../include/semaphore.h"
+#include "../include/barrier.h"
+#include "../include/rwlock.h"
 #include "../include/pmm.h"
 #include "../include/fs.h"
 
@@ -57,6 +60,16 @@ static void test_thread1(void)
 static volatile int mutex_test_counter = 0;
 static mutex_t mutex_test_lock;
 
+static barrier_t barrier_test;
+static volatile int barrier_test_passed = 0;
+
+static rwlock_t rwlock_test;
+static volatile int rwlock_test_readers = 0;
+static volatile int rwlock_test_max_readers = 0;
+static volatile int rwlock_test_writer_entered = 0;
+static volatile int rwlock_test_writer_error = 0;
+static volatile int rwlock_test_done = 0;
+
 static semaphore_t semaphore_test_empty;
 static semaphore_t semaphore_test_full;
 static mutex_t semaphore_test_lock;
@@ -64,6 +77,82 @@ static int semaphore_test_buffer;
 static volatile int semaphore_test_produced = 0;
 static volatile int semaphore_test_consumed = 0;
 static volatile int semaphore_test_errors = 0;
+
+static void barrier_test_thread(void)
+{
+    int my_thread = current_thread;
+
+    vga_printf("  Barrier thread %d reached round 1\n", my_thread);
+
+    barrier_wait(&barrier_test);
+
+    barrier_test_passed++;
+
+    vga_printf("  Barrier thread %d passed round 1\n", my_thread);
+
+    barrier_wait(&barrier_test);
+
+    barrier_test_passed++;
+
+    vga_printf("  Barrier thread %d passed round 2\n", my_thread);
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+static void rwlock_test_reader(void)
+{
+    rwlock_read_lock(&rwlock_test);
+
+    rwlock_test_readers++;
+
+    if (rwlock_test_readers > rwlock_test_max_readers) {
+        rwlock_test_max_readers = rwlock_test_readers;
+    }
+
+    vga_printf("  RWLock reader %d entered (%d readers)\n",
+               current_thread, rwlock_test_readers);
+
+    sleep(100);
+
+    rwlock_test_readers--;
+
+    rwlock_read_unlock(&rwlock_test);
+
+    vga_printf("  RWLock reader %d exited\n", current_thread);
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+static void rwlock_test_writer(void)
+{
+    rwlock_write_lock(&rwlock_test);
+
+    rwlock_test_writer_entered = 1;
+
+    if (rwlock_test_readers != 0) {
+        rwlock_test_writer_error = 1;
+    }
+
+    vga_printf("  RWLock writer %d entered (%d readers)\n",
+               current_thread, rwlock_test_readers);
+
+    for (volatile uint32_t i = 0; i < 1000000; i++) {
+    }
+
+    rwlock_write_unlock(&rwlock_test);
+
+    vga_printf("  RWLock writer %d exited\n", current_thread);
+
+    rwlock_test_done = 1;
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
 
 static void semaphore_test_producer(void)
 {
@@ -143,6 +232,8 @@ static void test_process2(void)
  * Forward declarations of shell commands
  * --------------------------------------------------------------------------*/
 static void cmd_ticks(void);
+static void cmd_barrier(void);
+static void cmd_rwlock(void);
 static void cmd_help(void);
 static void cmd_clear(void);
 static void cmd_about(void);
@@ -166,6 +257,58 @@ static size_t k_strlen(const char *s) {
     size_t n = 0;
     while (s[n]) n++;
     return n;
+}
+
+static const char *shell_commands[] = {
+    "help",
+    "clear",
+    "about",
+    "echo",
+    "mem",
+    "meminfo",
+    "free",
+    "ticks",
+    "barrier",
+    "rwlock",
+    "ps",
+    "threads",
+    "ls",
+    "touch",
+    "cat",
+    "write",
+    "rm"
+};
+
+#define SHELL_COMMAND_COUNT \
+    (sizeof(shell_commands) / sizeof(shell_commands[0]))
+
+static const char *shell_find_completion(const char *prefix, int prefix_len)
+{
+    const char *match = 0;
+    int matches = 0;
+
+    for (size_t i = 0; i < SHELL_COMMAND_COUNT; i++) {
+        const char *command = shell_commands[i];
+        int matches_prefix = 1;
+
+        for (int j = 0; j < prefix_len; j++) {
+            if (command[j] != prefix[j]) {
+                matches_prefix = 0;
+                break;
+            }
+        }
+
+        if (matches_prefix && command[prefix_len] != '\0') {
+            match = command;
+            matches++;
+        }
+    }
+
+    if (matches == 1) {
+        return match;
+    }
+
+    return 0;
 }
 
 static int k_tokenize(char *line, char *argv[], int max_args)
@@ -250,7 +393,63 @@ static void print_splash(void) {
  * --------------------------------------------------------------------------*/
 static void cmd_ticks(void)
 {
-    vga_printf("Timer ticks: %u\\n", timer_ticks);
+    vga_printf("Timer ticks: %u\n", timer_ticks);
+}
+
+static void cmd_rwlock(void)
+{
+    rwlock_init(&rwlock_test);
+
+    rwlock_test_readers = 0;
+    rwlock_test_max_readers = 0;
+    rwlock_test_writer_entered = 0;
+    rwlock_test_writer_error = 0;
+    rwlock_test_done = 0;
+
+    if (thread_create(0, "rw-reader1", rwlock_test_reader) == 0 ||
+        thread_create(0, "rw-reader2", rwlock_test_reader) == 0) {
+        vga_puts("  Failed to create RWLock reader threads\n");
+        return;
+    }
+
+    sleep(50);
+
+    if (thread_create(0, "rw-writer", rwlock_test_writer) == 0) {
+        vga_puts("  Failed to create RWLock writer thread\n");
+        return;
+    }
+
+    vga_puts("  RWLock test started with 2 readers and 1 writer.\n");
+}
+
+static void cmd_barrier(void)
+{
+    if (barrier_test_passed != 0) {
+        vga_printf("  Barrier test already passed (%d threads)\n",
+                   barrier_test_passed);
+        return;
+    }
+
+    barrier_init(&barrier_test, 3);
+    barrier_test_passed = 0;
+
+    thread_create(0, "barrier1", barrier_test_thread);
+    thread_create(0, "barrier2", barrier_test_thread);
+    thread_create(0, "barrier3", barrier_test_thread);
+
+    vga_puts("  Barrier test started with 3 threads.\n");
+}
+
+static void cmd_sleep(uint32_t ms)
+{
+    uint32_t before = timer_ticks;
+
+    sleep(ms);
+
+    uint32_t elapsed = timer_ticks - before;
+
+    vga_printf("  Slept for %u ms (%u ticks)\n",
+               elapsed * 10, elapsed);
 }
 
 static void cmd_ps(void)
@@ -307,6 +506,8 @@ static void cmd_help(void) {
     vga_puts("  mem     – Show physical memory usage\n");
     vga_puts("  meminfo – Show physical memory usage\n");
     vga_puts_color("\n  Milestones (to implement):\n", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts("  ticks   – Show timer tick count\n");
+    vga_puts("  sleep   – Sleep for a number of milliseconds\n");
     vga_puts("  ps      – [L09] List processes\n");
     vga_puts("  kill    – [L09] Terminate a process\n");
     vga_puts("  threads – [L10] List kernel threads\n");
@@ -496,7 +697,7 @@ static void shell_run(void) {
 
     while (true) {
         vga_puts_color(prompt, VGA_LIGHT_GREEN, VGA_BLACK);
-        kb_readline(shell_buf, sizeof(shell_buf));
+        kb_readline(shell_buf, sizeof(shell_buf), shell_find_completion);
 
         /* Tokenize command line */
         char *argv[16];
@@ -519,6 +720,34 @@ static void shell_run(void) {
             continue;
         }
         if (k_strcmp(cmd, "ticks") == 0) { cmd_ticks(); continue; }
+        if (k_strcmp(cmd, "barrier") == 0) { cmd_barrier(); continue; }
+        if (k_strcmp(cmd, "rwlock") == 0) { cmd_rwlock(); continue; }
+
+        if (k_strcmp(cmd, "sleep") == 0) {
+            if (argc != 2) {
+                vga_puts("  Usage: sleep <milliseconds>\n");
+            } else {
+                uint32_t ms = 0;
+                bool valid = true;
+
+                for (int i = 0; argv[1][i] != '\0'; i++) {
+                    if (argv[1][i] < '0' || argv[1][i] > '9') {
+                        valid = false;
+                        break;
+                    }
+
+                    ms = ms * 10u + (uint32_t)(argv[1][i] - '0');
+                }
+
+                if (!valid) {
+                    vga_puts("  Invalid milliseconds\\n");
+                } else {
+                    cmd_sleep(ms);
+                }
+            }
+            continue;
+        }
+
         if (k_strcmp(cmd, "ps")    == 0) { cmd_ps();    continue; }
 
         if (k_strcmp(cmd, "ls") == 0) {

@@ -22,6 +22,7 @@ typedef struct {
     void        (*entry)(void);
     char          name[32];
     uint32_t      ticks;
+    uint32_t      wake_tick;
 } pcb_t;
 
 #define PCB_ESP_OFFSET 8

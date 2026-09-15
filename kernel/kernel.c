@@ -34,6 +34,7 @@
 #include "../include/mutex.h"
 #include "../include/semaphore.h"
 #include "../include/barrier.h"
+#include "../include/rwlock.h"
 #include "../include/pmm.h"
 #include "../include/fs.h"
 
@@ -62,6 +63,13 @@ static mutex_t mutex_test_lock;
 static barrier_t barrier_test;
 static volatile int barrier_test_passed = 0;
 
+static rwlock_t rwlock_test;
+static volatile int rwlock_test_readers = 0;
+static volatile int rwlock_test_max_readers = 0;
+static volatile int rwlock_test_writer_entered = 0;
+static volatile int rwlock_test_writer_error = 0;
+static volatile int rwlock_test_done = 0;
+
 static semaphore_t semaphore_test_empty;
 static semaphore_t semaphore_test_full;
 static mutex_t semaphore_test_lock;
@@ -87,6 +95,59 @@ static void barrier_test_thread(void)
     barrier_test_passed++;
 
     vga_printf("  Barrier thread %d passed round 2\n", my_thread);
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+static void rwlock_test_reader(void)
+{
+    rwlock_read_lock(&rwlock_test);
+
+    rwlock_test_readers++;
+
+    if (rwlock_test_readers > rwlock_test_max_readers) {
+        rwlock_test_max_readers = rwlock_test_readers;
+    }
+
+    vga_printf("  RWLock reader %d entered (%d readers)\n",
+               current_thread, rwlock_test_readers);
+
+    sleep(100);
+
+    rwlock_test_readers--;
+
+    rwlock_read_unlock(&rwlock_test);
+
+    vga_printf("  RWLock reader %d exited\n", current_thread);
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+static void rwlock_test_writer(void)
+{
+    rwlock_write_lock(&rwlock_test);
+
+    rwlock_test_writer_entered = 1;
+
+    if (rwlock_test_readers != 0) {
+        rwlock_test_writer_error = 1;
+    }
+
+    vga_printf("  RWLock writer %d entered (%d readers)\n",
+               current_thread, rwlock_test_readers);
+
+    for (volatile uint32_t i = 0; i < 1000000; i++) {
+    }
+
+    rwlock_write_unlock(&rwlock_test);
+
+    vga_printf("  RWLock writer %d exited\n", current_thread);
+
+    rwlock_test_done = 1;
 
     for (;;) {
         __asm__ __volatile__("hlt");
@@ -172,6 +233,7 @@ static void test_process2(void)
  * --------------------------------------------------------------------------*/
 static void cmd_ticks(void);
 static void cmd_barrier(void);
+static void cmd_rwlock(void);
 static void cmd_help(void);
 static void cmd_clear(void);
 static void cmd_about(void);
@@ -207,6 +269,7 @@ static const char *shell_commands[] = {
     "free",
     "ticks",
     "barrier",
+    "rwlock",
     "ps",
     "threads",
     "ls",
@@ -330,7 +393,33 @@ static void print_splash(void) {
  * --------------------------------------------------------------------------*/
 static void cmd_ticks(void)
 {
-    vga_printf("Timer ticks: %u\\n", timer_ticks);
+    vga_printf("Timer ticks: %u\n", timer_ticks);
+}
+
+static void cmd_rwlock(void)
+{
+    rwlock_init(&rwlock_test);
+
+    rwlock_test_readers = 0;
+    rwlock_test_max_readers = 0;
+    rwlock_test_writer_entered = 0;
+    rwlock_test_writer_error = 0;
+    rwlock_test_done = 0;
+
+    if (thread_create(0, "rw-reader1", rwlock_test_reader) == 0 ||
+        thread_create(0, "rw-reader2", rwlock_test_reader) == 0) {
+        vga_puts("  Failed to create RWLock reader threads\n");
+        return;
+    }
+
+    sleep(50);
+
+    if (thread_create(0, "rw-writer", rwlock_test_writer) == 0) {
+        vga_puts("  Failed to create RWLock writer thread\n");
+        return;
+    }
+
+    vga_puts("  RWLock test started with 2 readers and 1 writer.\n");
 }
 
 static void cmd_barrier(void)
@@ -632,6 +721,7 @@ static void shell_run(void) {
         }
         if (k_strcmp(cmd, "ticks") == 0) { cmd_ticks(); continue; }
         if (k_strcmp(cmd, "barrier") == 0) { cmd_barrier(); continue; }
+        if (k_strcmp(cmd, "rwlock") == 0) { cmd_rwlock(); continue; }
 
         if (k_strcmp(cmd, "sleep") == 0) {
             if (argc != 2) {

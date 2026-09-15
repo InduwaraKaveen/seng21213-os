@@ -191,3 +191,25 @@ xxd seng21213-os.img | grep -c aa55  # Verify boot signature
 ---
 
 *Happy hacking! Remember: every commercial OS started exactly like this.*
+
+## Implemented Extensions
+
+The following assignment extensions were implemented:
+
+- Shell tab completion
+- Shell command history (20 entries)
+- Kernel `sleep(ms)`
+- Reusable thread barrier
+- Reader-writer lock
+
+### Extension Testing
+
+After booting with `make run`:
+
+- Tab completion: type `he` and press TAB.
+- Command history: use the Up/Down Arrow keys after entering commands.
+- Sleep: run `sleep 1000`, `sleep 50`, `sleep 1`, or `sleep 0`.
+- Barrier: run `barrier`.
+- Reader-writer lock: run `rwlock`.
+
+The final submission tag is `v0.5-stage4`.

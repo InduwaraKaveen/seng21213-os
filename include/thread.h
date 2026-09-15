@@ -16,6 +16,7 @@ typedef struct {
     void (*entry)(void);
     char name[24];
     uint32_t ticks;
+    uint32_t wake_tick;
 } tcb_t;
 
 void thread_init(void);

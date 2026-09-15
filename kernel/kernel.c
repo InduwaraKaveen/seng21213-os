@@ -29,6 +29,7 @@
 #include "../include/pit.h"
 #include "../include/process.h"
 #include "../include/scheduler.h"
+#include "../include/sleep.h"
 #include "../include/thread.h"
 #include "../include/mutex.h"
 #include "../include/semaphore.h"
@@ -303,6 +304,18 @@ static void cmd_ticks(void)
     vga_printf("Timer ticks: %u\\n", timer_ticks);
 }
 
+static void cmd_sleep(uint32_t ms)
+{
+    uint32_t before = timer_ticks;
+
+    sleep(ms);
+
+    uint32_t elapsed = timer_ticks - before;
+
+    vga_printf("  Slept for %u ms (%u ticks)\n",
+               elapsed * 10, elapsed);
+}
+
 static void cmd_ps(void)
 {
     vga_puts("\n  PID   NAME       STATE       TICKS\n");
@@ -357,6 +370,8 @@ static void cmd_help(void) {
     vga_puts("  mem     – Show physical memory usage\n");
     vga_puts("  meminfo – Show physical memory usage\n");
     vga_puts_color("\n  Milestones (to implement):\n", VGA_LIGHT_CYAN, VGA_BLACK);
+    vga_puts("  ticks   – Show timer tick count\n");
+    vga_puts("  sleep   – Sleep for a number of milliseconds\n");
     vga_puts("  ps      – [L09] List processes\n");
     vga_puts("  kill    – [L09] Terminate a process\n");
     vga_puts("  threads – [L10] List kernel threads\n");
@@ -569,6 +584,32 @@ static void shell_run(void) {
             continue;
         }
         if (k_strcmp(cmd, "ticks") == 0) { cmd_ticks(); continue; }
+
+        if (k_strcmp(cmd, "sleep") == 0) {
+            if (argc != 2) {
+                vga_puts("  Usage: sleep <milliseconds>\n");
+            } else {
+                uint32_t ms = 0;
+                bool valid = true;
+
+                for (int i = 0; argv[1][i] != '\0'; i++) {
+                    if (argv[1][i] < '0' || argv[1][i] > '9') {
+                        valid = false;
+                        break;
+                    }
+
+                    ms = ms * 10u + (uint32_t)(argv[1][i] - '0');
+                }
+
+                if (!valid) {
+                    vga_puts("  Invalid milliseconds\\n");
+                } else {
+                    cmd_sleep(ms);
+                }
+            }
+            continue;
+        }
+
         if (k_strcmp(cmd, "ps")    == 0) { cmd_ps();    continue; }
 
         if (k_strcmp(cmd, "ls") == 0) {

@@ -91,16 +91,23 @@ int scheduler_tick(void)
     }
 
     /*
-     * No other READY unit exists.
+     * No READY unit exists.
      *
-     * Restore the current unit to RUNNING.
+     * A blocked unit may temporarily remain the execution context
+     * while it executes its HLT-based sleep wait.  Do not turn it
+     * back into RUNNING here; sleep_tick() will make it READY when
+     * its wake deadline arrives.
      */
     if (current_unit_type == SCHED_PROCESS) {
-        proc_table[current_proc].state = PROC_RUNNING;
+        if (proc_table[current_proc].state != PROC_BLOCKED) {
+            proc_table[current_proc].state = PROC_RUNNING;
+        }
         return current_proc;
     }
 
-    thread_table[current_thread].state = PROC_RUNNING;
+    if (thread_table[current_thread].state != PROC_BLOCKED) {
+        thread_table[current_thread].state = PROC_RUNNING;
+    }
     return MAX_PROCS + current_thread;
 }
 

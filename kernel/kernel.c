@@ -33,6 +33,7 @@
 #include "../include/thread.h"
 #include "../include/mutex.h"
 #include "../include/semaphore.h"
+#include "../include/barrier.h"
 #include "../include/pmm.h"
 #include "../include/fs.h"
 
@@ -58,6 +59,9 @@ static void test_thread1(void)
 static volatile int mutex_test_counter = 0;
 static mutex_t mutex_test_lock;
 
+static barrier_t barrier_test;
+static volatile int barrier_test_passed = 0;
+
 static semaphore_t semaphore_test_empty;
 static semaphore_t semaphore_test_full;
 static mutex_t semaphore_test_lock;
@@ -65,6 +69,29 @@ static int semaphore_test_buffer;
 static volatile int semaphore_test_produced = 0;
 static volatile int semaphore_test_consumed = 0;
 static volatile int semaphore_test_errors = 0;
+
+static void barrier_test_thread(void)
+{
+    int my_thread = current_thread;
+
+    vga_printf("  Barrier thread %d reached round 1\n", my_thread);
+
+    barrier_wait(&barrier_test);
+
+    barrier_test_passed++;
+
+    vga_printf("  Barrier thread %d passed round 1\n", my_thread);
+
+    barrier_wait(&barrier_test);
+
+    barrier_test_passed++;
+
+    vga_printf("  Barrier thread %d passed round 2\n", my_thread);
+
+    for (;;) {
+        __asm__ __volatile__("hlt");
+    }
+}
 
 static void semaphore_test_producer(void)
 {
@@ -144,6 +171,7 @@ static void test_process2(void)
  * Forward declarations of shell commands
  * --------------------------------------------------------------------------*/
 static void cmd_ticks(void);
+static void cmd_barrier(void);
 static void cmd_help(void);
 static void cmd_clear(void);
 static void cmd_about(void);
@@ -178,6 +206,7 @@ static const char *shell_commands[] = {
     "meminfo",
     "free",
     "ticks",
+    "barrier",
     "ps",
     "threads",
     "ls",
@@ -302,6 +331,24 @@ static void print_splash(void) {
 static void cmd_ticks(void)
 {
     vga_printf("Timer ticks: %u\\n", timer_ticks);
+}
+
+static void cmd_barrier(void)
+{
+    if (barrier_test_passed != 0) {
+        vga_printf("  Barrier test already passed (%d threads)\n",
+                   barrier_test_passed);
+        return;
+    }
+
+    barrier_init(&barrier_test, 3);
+    barrier_test_passed = 0;
+
+    thread_create(0, "barrier1", barrier_test_thread);
+    thread_create(0, "barrier2", barrier_test_thread);
+    thread_create(0, "barrier3", barrier_test_thread);
+
+    vga_puts("  Barrier test started with 3 threads.\n");
 }
 
 static void cmd_sleep(uint32_t ms)
@@ -584,6 +631,7 @@ static void shell_run(void) {
             continue;
         }
         if (k_strcmp(cmd, "ticks") == 0) { cmd_ticks(); continue; }
+        if (k_strcmp(cmd, "barrier") == 0) { cmd_barrier(); continue; }
 
         if (k_strcmp(cmd, "sleep") == 0) {
             if (argc != 2) {

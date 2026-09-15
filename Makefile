@@ -64,6 +64,7 @@ KERNEL_C_SRCS  := kernel/kernel.c \
                    kernel/thread.c \
                    kernel/sleep.c \
                    kernel/mutex.c \
+                   kernel/barrier.c \
                    kernel/semaphore.c \
                    kernel/pmm.c       \
                    kernel/ramdisk.c   \
